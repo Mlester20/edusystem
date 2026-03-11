@@ -9,6 +9,7 @@ import mongoose from 'mongoose';
 import { connectDB } from './config/db';
 import userRoutes from './routes/user';
 import LogsRouter from './routes/activitieslog';
+import { academicYearRouter } from './routes/academicYear';
 
 dotenv.config();
 
@@ -40,8 +41,10 @@ app.get('/', (req: Request, res: Response) => {
     res.status(200).json({status: 'OK', message: 'Server is healthy' });
 });
 
+//routes
 app.use('/api/users', userRoutes);
 app.use("/api/activities", LogsRouter)
+app.use('/api/academic-years', academicYearRouter);
 
 //global error handler
 app.use((err: Error, req: Request, res: Response, next: Function) => {
