@@ -2,8 +2,12 @@ import { type Request, type Response } from "express";
 import User from "../models/user";
 import { generateToken } from "../utils/generateToken";
 import { logActivity } from "../utils/activitieslog";
+import type { AuthRequest } from "../middleware/auth";
 
 
+// @desc    Register a new user
+// @route   POST /api/users/register
+// @access  Private (Admin & Teacher only)
 export const register = async (req: Request, res: Response):Promise<void> => {
     try{
         const {
@@ -55,7 +59,6 @@ export const register = async (req: Request, res: Response):Promise<void> => {
 // @desc    Auth user & get token
 // @route   POST /api/users/login
 // @access  Public
-
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body;
@@ -77,7 +80,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 // @desc Update user (admin)
 // @route PUT /api/users/:id
 // @access Private/Admin
-
 export const updateUser = async (req: Request, res: Response):Promise<void> => {
     try{
         const user = await User.findById(req.params.id);
@@ -123,6 +125,117 @@ export const updateUser = async (req: Request, res: Response):Promise<void> => {
     }
 }
 
+// @desc    Get all users (With Pagination & Filtering)
+// @route   GET /api/users
+// @access  Private/Admin
+export const getUsers = async(req: Request, res: Response): Promise<void> => {
+    try{
+        //1. Parse Query Params safely
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 10;
+        const role = req.query.role as string;
+        const search = req.query.search as string;
+
+        const skip = (page - 1) * limit;
+
+        //2. build filter object
+        const filter: any = {};
+
+        if(role && role !== "all" && role !== ""){
+            filter.role = role;
+        }
+
+        if(search){
+            filter.$or = [
+                {name: {$regex: search, $options: "i"} },
+                {email: {$regex: search, $options: "i"} },
+            ];
+        }
+
+        // 3. Fetch Users with Pagination & Filtering
+        const [total, users] = await Promise.all([
+        User.countDocuments(filter),
+        User.find(filter)
+            .select("-password")
+            // .populate("studentClass", "_id name section") // Added section for context
+            // .populate("teacherSubjects", "_id name code")
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit),
+        ]);
+
+        //4. Send Response
+        res.json({
+            users,
+            pagination: {
+                total,
+                page,
+                pages: Math.ceil(total / limit),
+                limit,
+            },
+        });
+    }catch(error){
+        res.status(500).json({message: "Server error", error});
+    }
+}
+
 // @desc delete user (admin)
 // @route DELETE /api/users/:id
 // @access Private/Admin
+export const deleteUser = async(req: Request, res: Response) => {
+    try{
+        const user = await User.findById(req.params.id);
+        if(user){
+            await user.deleteOne();
+            if((req as any).user) {
+                await logActivity({
+                    userId: (req as any).user._id.toString(),
+                    action: "Deleted User",
+                    details: `Deleted user with email: ${user.email}`
+                });
+            }
+            res.json({ message: "User deleted successfully" });
+        }else{
+            res.status(404).json({ message: "User not found" });
+        }
+    }catch(error){
+        res.status(500).json({ message: "Server Error", error });
+    }
+}
+
+// @desc    Get user profile (via cookie)
+// @route   GET /api/users/profile
+// @access  Private
+export const getUserProfile = async(req: AuthRequest, res: Response) => {
+    try{
+        if(req.user){
+            res.json({
+                user: {
+                    _id: req.user._id,
+                    name: req.user.name,
+                    email: req.user.email,
+                    role: req.user.role,
+                },
+            })
+        }else{
+            res.status(401).json({message: "Not authorized"});
+        }
+    }catch(error){
+        res.status(500).json({message: "Server error", error});
+    }
+}
+
+// @desc    Logout user / clear cookie
+// @route   POST /api/users/logout
+// @access  Public
+export const logoutUser = async(req: Request, res: Response) => {
+    try{
+        res.cookie('jwt', '', {
+            httpOnly: true,
+            expires: new Date(0), //expire immediately
+        });
+        res.json({message: "Logged out successfully"});
+    }catch(error){
+        res.status(500).json({message: "Server error", error});
+    }
+}
